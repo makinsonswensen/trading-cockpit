@@ -1,0 +1,11 @@
+# 共生者交易决策系统 - Python 依赖
+# 安装命令: pip install -r requirements.txt
+
+# ===== 核心依赖 =====
+ccxt>=4.5.0          # 加密货币交易所 SDK（支持 100+ 交易所）
+Flask>=3.0.0         # Web 框架
+flask-cors>=4.0.0    # 跨域支持
+numpy>=1.24.0        # 数值计算（均线计算等）
+
+# ===== 可选依赖 =====
+# python-dotenv>=1.0.0   # 环境变量加载（如需使用 .env 文件）
