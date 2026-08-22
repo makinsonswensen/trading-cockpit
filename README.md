@@ -14,7 +14,7 @@
 ### 实时行情模块
 - 接入 CCXT，支持 Binance / OKX / Bybit 等 100+ 交易所
 - 实时价格、24h涨跌幅、最高/最低、成交量、市值
-- 5分钟自动刷新缓存，30秒前端轮询
+- 两层缓存架构，减少交易所请求
 
 ### 均线雷达（多周期矩阵）
 - 1h / 4h / 1d 三周期均线矩阵
@@ -85,6 +85,13 @@ copy .env.example .env
 
 5. **启动服务**
 ```bash
+# 方式一：使用启动脚本（推荐，自动检查依赖和配置）
+# Windows
+start.bat
+# macOS/Linux
+chmod +x start.sh && ./start.sh
+
+# 方式二：直接运行
 python app.py
 ```
 
@@ -102,8 +109,41 @@ python app.py
 |--------|------|--------|
 | `EXCHANGE_ID` | 交易所 ID（ccxt 支持的交易所） | `binance` |
 | `SYMBOL` | 交易对 | `BTC/USDT` |
-| `CACHE_TTL` | 数据缓存时间（秒） | `300` |
+| `CACHE_TTL` | 信号结果缓存时间（秒） | `300` |
+| `cache_ttl_sec` | K线缓存基准TTL（秒），各周期按此缩放 | `60` |
 | `OBSIDIAN_VAULT_PATH` | Obsidian Vault 根目录路径 | `./obsidian-vault` |
+| `NOTE_FOLDER` | 交易日记子文件夹名 | `交易日记` |
+| `HOST` | 服务监听地址 | `0.0.0.0` |
+| `PORT` | 服务端口 | `5001` |
+
+### 缓存架构
+
+系统采用两层缓存，减少对交易所的重复请求：
+
+```
+请求 /api/signal
+  │
+  ├─ 信号缓存未过期 → 直接返回（不触发K线获取）
+  │    TTL = CACHE_TTL (默认300秒)
+  │
+  └─ 信号缓存过期 → 调用 fetch_klines()
+       │
+       ├─ 1h K线缓存过期?  → 请求交易所
+       ├─ 4h K线缓存过期?  → 请求交易所
+       ├─ 8h K线缓存未过期? → 走缓存
+       ├─ 12h K线缓存未过期? → 走缓存
+       └─ 1d K线缓存未过期? → 走缓存
+```
+
+K线各周期缓存TTL基于 `cache_ttl_sec` 缩放：
+
+| 周期 | TTL公式 | 默认值 | 说明 |
+|------|---------|--------|------|
+| 1h | `cache_ttl_sec × 1` | 60s | 变化最快，缓存最短 |
+| 4h | `cache_ttl_sec × 3` | 180s | |
+| 8h | `cache_ttl_sec × 6` | 360s | |
+| 12h | `cache_ttl_sec × 10` | 600s | |
+| 1d | `cache_ttl_sec × 20` | 1200s | 变化最慢，缓存最长 |
 
 ### 可配置参数（app.py）
 
@@ -120,10 +160,13 @@ KLINE_LIMIT = 150             # 每周期K线数量
 
 ```
 trading-cockpit/
-├── app.py                 # Flask 后端服务（信号计算 + API）
+├── app.py                 # Flask 后端服务（信号计算 + API + 两层缓存）
 ├── trading-cockpit.html   # 前端驾驶舱页面
+├── start.bat              # Windows 启动脚本
+├── start.sh               # macOS/Linux 启动脚本
 ├── requirements.txt       # Python 依赖
-├── .env.example           # 环境变量模板
+├── .env.example           # 环境变量模板（提交到 Git）
+├── .env                   # 本地配置（不提交，已 gitignore）
 ├── .gitignore             # Git 忽略规则
 └── README.md              # 项目说明文档
 ```
@@ -144,10 +187,14 @@ GET /api/signal
 GET /api/health
 ```
 
+返回信号缓存状态和每个周期的K线缓存状态（命中/过期、剩余秒数、TTL、K线数量）。
+
 ### 强制刷新数据
 ```
 POST /api/refresh
 ```
+
+清空信号缓存和K线缓存，下次请求将重新从交易所获取全部数据。
 
 ### 交易笔记
 

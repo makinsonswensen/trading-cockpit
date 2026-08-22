@@ -28,12 +28,29 @@ TIMEFRAMES = ['1h', '4h', '8h', '12h', '1d']
 # 每个周期需要获取的K线数量（足够计算MA99+形态）
 KLINE_LIMIT = 150
 
-# 全局缓存
+# 信号结果缓存（最终计算结果）
 _cache = {
     'data': None,
     'last_update': 0,
-    'cache_ttl': int(os.environ.get('CACHE_TTL', 300))  # 默认5分钟缓存
+    'cache_ttl': int(os.environ.get('CACHE_TTL', 300))  # 默认5分钟
 }
+
+# ========== K线缓存层 ==========
+# 按周期独立缓存，大周期缓存更久，减少重复请求
+# cache_ttl_sec 为基准TTL，各周期按自身时长缩放
+_cache_ttl_base = int(os.environ.get('cache_ttl_sec', '60'))  # 基准：1h周期缓存60秒
+
+# 各周期缓存TTL（秒），基于基准值缩放
+_KLINE_CACHE_TTL = {
+    '1h':  _cache_ttl_base,          # 1h: 60秒
+    '4h':  _cache_ttl_base * 3,      # 4h: 180秒
+    '8h':  _cache_ttl_base * 6,      # 8h: 360秒
+    '12h': _cache_ttl_base * 10,     # 12h: 600秒
+    '1d':  _cache_ttl_base * 20,     # 1d: 1200秒
+}
+
+# K线缓存存储：{ '1h': {'data': [...], 'ts': 1234567890}, ... }
+_kline_cache = {}
 
 # 初始化交易所
 exchange_config = {
@@ -82,19 +99,42 @@ def calc_slope(ma_values, lookback=3):
     return sum(changes) / len(changes)
 
 
-# ========== K线数据获取 ==========
+# ========== K线数据获取（带缓存层）==========
 def fetch_klines():
-    """获取所有周期的K线数据"""
+    """获取所有周期的K线数据，优先走缓存，仅过期的周期才请求交易所"""
     klines = {}
+    now = time.time()
+    fetched = []
+    cached = []
+
     for tf in TIMEFRAMES:
+        entry = _kline_cache.get(tf)
+        ttl = _KLINE_CACHE_TTL.get(tf, _cache_ttl_base)
+
+        if entry and (now - entry['ts']) < ttl:
+            klines[tf] = entry['data']
+            cached.append(tf)
+            continue
+
         try:
             ohlcv = exchange.fetch_ohlcv(SYMBOL, timeframe=tf, limit=KLINE_LIMIT)
             klines[tf] = ohlcv
-            print(f"[OK] 获取 {tf} K线: {len(ohlcv)} 根")
+            _kline_cache[tf] = {'data': ohlcv, 'ts': now}
+            fetched.append(tf)
+            time.sleep(exchange.rateLimit / 1000)
         except Exception as e:
             print(f"[ERROR] 获取 {tf} K线失败: {e}")
-            klines[tf] = []
-        time.sleep(exchange.rateLimit / 1000)
+            if entry:
+                klines[tf] = entry['data']
+                cached.append(tf)
+            else:
+                klines[tf] = []
+
+    if cached:
+        print(f"[CACHE] 命中缓存周期: {', '.join(cached)}")
+    if fetched:
+        print(f"[FETCH] 请求交易所周期: {', '.join(fetched)}")
+
     return klines
 
 
@@ -791,12 +831,30 @@ def get_signal():
 @app.route('/api/health')
 def health():
     """健康检查"""
+    now = time.time()
+    kline_status = {}
+    for tf in TIMEFRAMES:
+        entry = _kline_cache.get(tf)
+        ttl = _KLINE_CACHE_TTL.get(tf, _cache_ttl_base)
+        if entry:
+            remaining = int(ttl - (now - entry['ts']))
+            kline_status[tf] = {
+                'cached': remaining > 0,
+                'remaining_sec': max(remaining, 0),
+                'ttl_sec': ttl,
+                'bars': len(entry['data'])
+            }
+        else:
+            kline_status[tf] = {'cached': False, 'remaining_sec': 0, 'ttl_sec': ttl, 'bars': 0}
+
     return jsonify({
         'status': 'ok',
         'exchange': EXCHANGE_ID,
         'symbol': SYMBOL,
-        'cache_ttl': _cache['cache_ttl'],
-        'last_update': _cache['last_update']
+        'signal_cache_ttl': _cache['cache_ttl'],
+        'signal_last_update': _cache['last_update'],
+        'kline_cache_base_ttl': _cache_ttl_base,
+        'kline_cache': kline_status
     })
 
 
@@ -972,9 +1030,10 @@ def index():
 
 @app.route('/api/refresh', methods=['POST'])
 def force_refresh():
-    """强制刷新数据"""
-    _cache['last_update'] = 0  # 使缓存失效
-    return jsonify({'status': 'refreshing'})
+    """强制刷新数据（清空信号缓存 + K线缓存）"""
+    _cache['last_update'] = 0
+    _kline_cache.clear()
+    return jsonify({'status': 'refreshing', 'message': '信号缓存和K线缓存已清空'})
 
 
 if __name__ == '__main__':
@@ -983,7 +1042,10 @@ if __name__ == '__main__':
     print(f"交易所: {EXCHANGE_ID}")
     print(f"交易对: {SYMBOL}")
     print(f"周期: {', '.join(TIMEFRAMES)}")
-    print(f"缓存: {_cache['cache_ttl']}秒")
+    print(f"信号缓存: {_cache['cache_ttl']}秒")
+    print(f"K线缓存基准: {_cache_ttl_base}秒")
+    for tf in TIMEFRAMES:
+        print(f"  {tf}: TTL={_KLINE_CACHE_TTL.get(tf, _cache_ttl_base)}秒")
     print("=" * 50)
     
     # 启动时先计算一次
