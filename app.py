@@ -36,6 +36,16 @@ _cache = {
     'cache_ttl': int(os.environ.get('CACHE_TTL', 300))  # 默认5分钟
 }
 
+# K线源无响应导致计算为空时的重试间隔（秒）
+# 避免把空结果缓存满 5 分钟，让页面长时间显示 "--"
+CACHE_RETRY_TTL = int(os.environ.get('CACHE_RETRY_TTL', 30))
+
+
+def is_usable(data):
+    """数据是否可用：至少拿到当前价格，否则视为 K线获取失败"""
+    market = (data or {}).get('market') or {}
+    return bool(market.get('current_price'))
+
 # ========== K线缓存层 ==========
 # 按周期独立缓存，大周期缓存更久，减少重复请求
 # cache_ttl_sec 为基准TTL，各周期按自身时长缩放
@@ -901,6 +911,11 @@ def get_market_data(klines, ma_data):
         high_24h = max(k[2] for k in recent)
         low_24h = min(k[3] for k in recent)
     
+    # 24h 成交额估算：近 24 根 1h K线的 成交量 × 收盘价
+    volume_24h = 0
+    if len(ohlcv_1h) >= 24:
+        volume_24h = sum(k[5] * k[4] for k in ohlcv_1h[-24:])
+    
     return {
         'symbol': SYMBOL,
         'exchange': EXCHANGE_ID,
@@ -908,6 +923,7 @@ def get_market_data(klines, ma_data):
         'change_24h': round(change_24h, 2),
         'high_24h': round(high_24h, 2) if high_24h else None,
         'low_24h': round(low_24h, 2) if low_24h else None,
+        'volume_24h': round(volume_24h, 2) if volume_24h else None,
     }
 
 
@@ -976,10 +992,17 @@ def get_signal():
     
     try:
         data = compute_all()
-        _cache['data'] = data
-        _cache['last_update'] = now
+        # 只有拿到有效行情才写满 TTL；K线源无响应时只留短暂重试窗口
+        if is_usable(data):
+            _cache['data'] = data
+            _cache['last_update'] = now
+            data['cache_remaining'] = _cache['cache_ttl']
+        else:
+            _cache['data'] = data
+            _cache['last_update'] = now - _cache['cache_ttl'] + CACHE_RETRY_TTL
+            data['cache_remaining'] = CACHE_RETRY_TTL
+            print(f"[WARN] 未取到有效行情（K线源无响应），{CACHE_RETRY_TTL} 秒后重试")
         data['from_cache'] = False
-        data['cache_remaining'] = _cache['cache_ttl']
         return jsonify(data)
     except Exception as e:
         print(f"[ERROR] 计算失败: {e}")
@@ -1240,9 +1263,13 @@ if __name__ == '__main__':
     # 启动时先计算一次
     try:
         data = compute_all()
-        _cache['data'] = data
-        _cache['last_update'] = time.time()
-        print("\n初始数据加载完成！")
+        if is_usable(data):
+            _cache['data'] = data
+            _cache['last_update'] = time.time()
+            print("\n初始数据加载完成！")
+        else:
+            # 不写入完整缓存，服务起来后按 CACHE_RETRY_TTL 自动重试
+            print("\n初始行情未就绪（K线源无响应），服务启动后将自动重试")
     except Exception as e:
         print(f"\n初始加载失败: {e}")
     

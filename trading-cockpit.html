@@ -1903,6 +1903,11 @@ async function fetchData() {
       state.maMonitor = data.ma_monitor || state.maMonitor;
     }
     
+    // 行情为空（多为K线源无响应）：明确提示，而不是让各卡片静静显示 "--"
+    if (!data.market || !data.market.current_price) {
+      showErrorState('行情源暂时无数据（K线获取失败），稍后自动重试');
+    }
+    
     // 渲染所有模块
     renderAll();
     
@@ -1947,8 +1952,8 @@ function renderPrice() {
   
   highEl.textContent = formatPrice(m.high_24h);
   lowEl.textContent = formatPrice(m.low_24h);
-  volEl.textContent = '--';  // CCXT 简化行情不含成交量
-  mcapEl.textContent = '--';
+  volEl.textContent = formatLargeNumber(m.volume_24h);  // 近24根1h K线估算
+  mcapEl.textContent = '--';  // CCXT 行情不含市值
   
   document.getElementById('price-error').style.display = 'none';
   document.getElementById('price-container').style.display = 'block';
@@ -2063,7 +2068,7 @@ function renderResonance() {
   if (!state.resonance) return;
   
   const r = state.resonance;
-  const arrowMap = { bull: '↑', bear: '↓', neutral: '—' };
+  const arrowMap = { bull: '↑', bear: '↓', neutral: '→' };
   
   // 周期名称映射（API返回的key可能是小写）
   const periodKeys = ['1h', '4h', '8h', '12h', '1d'];
