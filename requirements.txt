@@ -1,11 +1,15 @@
 # 共生者交易决策系统 - Python 依赖
 # 安装命令: pip install -r requirements.txt
 
-# ===== 核心依赖 =====
+# ===== 驾驶舱后端 =====
 ccxt>=4.5.0          # 加密货币交易所 SDK（支持 100+ 交易所）
 Flask>=3.0.0         # Web 框架
 flask-cors>=4.0.0    # 跨域支持
 numpy>=1.24.0        # 数值计算（均线计算等）
+python-dotenv>=1.0.0 # 环境变量加载（.env）
 
-# ===== 可选依赖 =====
-# python-dotenv>=1.0.0   # 环境变量加载（如需使用 .env 文件）
+# ===== MA 共振后台（monitor/）=====
+pandas>=2.0.0        # K线数据处理
+apscheduler>=3.10.0  # 5 分钟定时扫描
+plyer>=2.1.0         # 桌面弹窗通知
+requests>=2.31.0     # 飞书 Webhook 推送

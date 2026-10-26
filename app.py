@@ -3,6 +3,7 @@
 使用 CCXT 从交易所获取真实 K 线数据，计算技术指标并提供 API
 """
 import ccxt
+import json
 import time
 import numpy as np
 from flask import Flask, jsonify, send_from_directory, request
@@ -51,6 +52,22 @@ _KLINE_CACHE_TTL = {
 
 # K线缓存存储：{ '1h': {'data': [...], 'ts': 1234567890}, ... }
 _kline_cache = {}
+
+# ========== MA 共振后台（只读接入）==========
+# 数据来源：monitor/scheduler.py 由 APScheduler 每 5 分钟扫描一次，
+# 结果落盘到 monitor/ma_resonance_state.json。驾驶舱只读该文件：
+# 不导入监控模块、不触发 scan_all、不写入状态，因此不会与后台进程冲突。
+# 默认读取仓库内的 monitor 目录（自包含），可用 MA_STATE_FILE 环境变量覆盖
+MA_STATE_FILE = os.path.normpath(
+    os.environ.get('MA_STATE_FILE')
+    or os.path.join(os.path.dirname(os.path.abspath(__file__)), 'monitor', 'ma_resonance_state.json')
+)
+MA_SCAN_INTERVAL = int(os.environ.get('MA_SCAN_INTERVAL', 300))   # 后台扫描间隔（秒）
+MA_STALE_SECONDS = int(os.environ.get('MA_STALE_SECONDS', 900))   # 超过该时长视为后台停摆
+MA_CONFIRM_SCANS = int(os.environ.get('MA_CONFIRM_SCANS', 4))     # 候选共振的确认扫描次数
+
+# 状态文件读取缓存：按 mtime 判断是否变化，避免每次请求都解析 JSON
+_ma_state_cache = {'mtime': None, 'data': None}
 
 # 初始化交易所
 exchange_config = {
@@ -600,8 +617,143 @@ def detect_patterns(klines, ma_data):
     return patterns
 
 
+# ========== MA 共振状态读取（只读）==========
+def load_ma_state(history_limit=8):
+    """
+    读取后台 MA 共振状态文件，返回给驾驶舱展示用的结构化数据。
+
+    只读设计：文件缺失、JSON 损坏、时间戳异常都降级返回 status=unavailable/stale，
+    绝不抛异常，也不触发后台扫描。
+    """
+    result = {
+        'status': 'unavailable',          # ok / stale / unavailable
+        'state_file': MA_STATE_FILE,
+        'scan_interval_sec': MA_SCAN_INTERVAL,
+        'stale_after_sec': MA_STALE_SECONDS,
+        'confirm_scans': MA_CONFIRM_SCANS,
+        'updated_at': None,
+        'age_sec': None,
+        'next_scan_in_sec': None,
+        'scan_count': 0,
+        'total_alerts': 0,
+        'watch_count': 0,
+        'snapshots': [],
+        'history': [],
+        'message': ''
+    }
+
+    try:
+        if not os.path.exists(MA_STATE_FILE):
+            result['message'] = '未找到状态文件，后台可能尚未启动'
+            return result
+
+        mtime = os.path.getmtime(MA_STATE_FILE)
+        if _ma_state_cache['data'] is None or _ma_state_cache['mtime'] != mtime:
+            with open(MA_STATE_FILE, 'r', encoding='utf-8') as f:
+                _ma_state_cache['data'] = json.load(f)
+            _ma_state_cache['mtime'] = mtime
+        data = _ma_state_cache['data'] or {}
+    except Exception as e:
+        result['message'] = f'读取状态文件失败：{e}'
+        return result
+
+    # ---- 运行健康度 ----
+    updated_at = data.get('updated_at')
+    age = None
+    if updated_at:
+        try:
+            age = max(0, int(time.time() - datetime.fromisoformat(updated_at).timestamp()))
+        except Exception:
+            age = None
+
+    if age is None:
+        result['status'] = 'unavailable'
+        result['message'] = '状态文件缺少有效更新时间'
+    elif age > MA_STALE_SECONDS:
+        result['status'] = 'stale'
+        result['message'] = f'已 {age // 60} 分钟未更新，后台可能已停止'
+    else:
+        result['status'] = 'ok'
+        result['next_scan_in_sec'] = max(0, MA_SCAN_INTERVAL - (age % MA_SCAN_INTERVAL))
+
+    result['updated_at'] = updated_at
+    result['age_sec'] = age
+    result['scan_count'] = int(data.get('scan_count') or 0)
+    result['total_alerts'] = int(data.get('total_alerts') or 0)
+
+    # ---- 各标的快照 ----
+    snapshots = []
+    for symbol, snap in (data.get('snapshots') or {}).items():
+        if not isinstance(snap, dict):
+            continue
+        candidate_count = int(snap.get('candidate_count') or 0)
+        snapshots.append({
+            'symbol': snap.get('symbol') or symbol,
+            'kind': snap.get('kind'),
+            'candidate': snap.get('candidate'),
+            'candidate_count': candidate_count,
+            'confirm_scans': MA_CONFIRM_SCANS,
+            'confirm_progress': f'{min(candidate_count, MA_CONFIRM_SCANS)}/{MA_CONFIRM_SCANS}',
+            'summary': snap.get('summary') or '--',
+            'states': snap.get('states') or {},
+            'updated_at': snap.get('updated_at')
+        })
+
+    # 排序：已确认多头 → 已确认空头 → 未确认，同组按标的字母序
+    kind_order = {'bull': 0, 'bear': 1}
+    snapshots.sort(key=lambda s: (kind_order.get(s['kind'], 2), s['symbol']))
+    result['snapshots'] = snapshots
+    result['watch_count'] = len(snapshots)
+
+    # ---- 最近事件（倒序，新事件在前）----
+    history = list(data.get('history') or [])
+    if history_limit and history_limit > 0:
+        history = history[-history_limit:]
+    events = []
+    for ev in reversed(history):
+        if not isinstance(ev, dict):
+            continue
+        events.append({
+            'symbol': ev.get('symbol'),
+            'kind': ev.get('kind'),
+            'summary': ev.get('summary') or '--',
+            'price': ev.get('price'),
+            'detected_at': ev.get('detected_at')
+        })
+    result['history'] = events
+
+    return result
+
+
+def get_ma_gate(ma_state=None):
+    """
+    取 BTC 的 MA 共振方向，作为微观狙击第三道闸门。
+
+    返回 {kind, summary, available, updated_at, state}；后台未运行或标的不存在时
+    available=False，闸门判为不通过（宁可漏一次，不放行一笔）。
+    """
+    if ma_state is None:
+        ma_state = load_ma_state(history_limit=0)
+
+    gate = {
+        'kind': None,
+        'summary': '--',
+        'available': False,
+        'updated_at': ma_state.get('updated_at'),
+        'states': {}
+    }
+    for snap in ma_state.get('snapshots', []):
+        if snap['symbol'] == SYMBOL or snap['symbol'] == 'BTC/USDT':
+            gate['kind'] = snap['kind']
+            gate['summary'] = snap['summary']
+            gate['states'] = snap['states']
+            gate['available'] = ma_state.get('status') == 'ok'
+            break
+    return gate
+
+
 # ========== 三段式决策系统 ==========
-def calc_decision(ma_data, resonance_data, patterns):
+def calc_decision(ma_data, resonance_data, patterns, ma_gate=None):
     """计算三段式决策结果"""
     
     # === 第一段：宏观雷达 ===
@@ -632,7 +784,10 @@ def calc_decision(ma_data, resonance_data, patterns):
     gates = {'gate1': False, 'gate2': False, 'gate3': False}
     gate1_text = '均线排列验证'
     gate2_text = '多周期共振确认'
-    gate3_text = 'K线形态触发'
+    gate3_text = 'MA共振同向'
+    
+    if ma_gate is None:
+        ma_gate = get_ma_gate()
     
     if stage >= 2:
         # 闸门一：主周期均线排列确认
@@ -646,15 +801,13 @@ def calc_decision(ma_data, resonance_data, patterns):
         # 闸门二：多周期共振
         gates['gate2'] = resonance in ('bull', 'bear')
         
-        # 闸门三：形态触发（需要有同向的强形态触发）
-        if resonance == 'bull':
-            strong_bull_patterns = [p for p in patterns 
-                                    if p['type'] == 'bull' and p['triggered'] and p['strength'] == 'strong']
-            gates['gate3'] = len(strong_bull_patterns) > 0
-        elif resonance == 'bear':
-            strong_bear_patterns = [p for p in patterns 
-                                    if p['type'] == 'bear' and p['triggered'] and p['strength'] == 'strong']
-            gates['gate3'] = len(strong_bear_patterns) > 0
+        # 闸门三：MA 共振方向闸门（1h/15m/5m 三周期共振，来自盯盘后台）
+        # 后台未运行（available=False）时视为不通过，避免用陈旧数据放行
+        if ma_gate.get('available'):
+            if resonance == 'bull':
+                gates['gate3'] = ma_gate.get('kind') == 'bull'
+            elif resonance == 'bear':
+                gates['gate3'] = ma_gate.get('kind') == 'bear'
         
         if all(gates.values()):
             stage = 3
@@ -686,7 +839,7 @@ def calc_decision(ma_data, resonance_data, patterns):
         
         signal = 'bull' if is_long else 'bear'
         signal_text = '做多信号' if is_long else '做空信号'
-        signal_subtext = '宏观{} + 均线排列 + 形态确认 · 建议入场'.format(
+        signal_subtext = '宏观{} + 均线排列 + MA共振确认 · 建议入场'.format(
             '多头' if is_long else '空头'
         )
     elif stage == 2:
@@ -703,6 +856,12 @@ def calc_decision(ma_data, resonance_data, patterns):
             'scan_periods': '1D / 12h / 8h'
         },
         'gates': gates,
+        'gate_labels': {
+            'gate1': gate1_text,
+            'gate2': gate2_text,
+            'gate3': gate3_text
+        },
+        'ma_gate': ma_gate,
         'signal': {
             'type': signal,
             'text': signal_text,
@@ -772,10 +931,14 @@ def compute_all():
     # 5. 形态识别
     patterns = detect_patterns(klines, ma_data)
     
-    # 6. 决策系统
-    decision = calc_decision(ma_data, resonance, patterns)
+    # 6. MA 共振后台状态（只读，作为第三道闸门）
+    ma_state = load_ma_state(history_limit=8)
+    ma_gate = get_ma_gate(ma_state)
     
-    # 7. 行情数据
+    # 7. 决策系统
+    decision = calc_decision(ma_data, resonance, patterns, ma_gate)
+    
+    # 8. 行情数据
     market = get_market_data(klines, ma_data)
     
     result = {
@@ -785,6 +948,7 @@ def compute_all():
         'ma_radar': ma_radar,
         'resonance': resonance,
         'patterns': patterns,
+        'ma_monitor': ma_state,
         'decision': decision
     }
     
@@ -828,6 +992,22 @@ def get_signal():
         return jsonify({'error': str(e)}), 500
 
 
+@app.route('/api/ma_resonance')
+def get_ma_resonance():
+    """
+    MA 共振后台状态（只读）
+
+    展示来源后台（盯盘查看信号报警）的运行情况、各标的确认进度与最近事件。
+    history 参数控制返回最近事件条数（0 表示不返回事件）。
+    """
+    try:
+        limit = int(request.args.get('limit', 8))
+    except (TypeError, ValueError):
+        limit = 8
+    limit = max(0, min(limit, 50))
+    return jsonify(load_ma_state(history_limit=limit))
+
+
 @app.route('/api/health')
 def health():
     """健康检查"""
@@ -847,6 +1027,7 @@ def health():
         else:
             kline_status[tf] = {'cached': False, 'remaining_sec': 0, 'ttl_sec': ttl, 'bars': 0}
 
+    ma_state = load_ma_state(history_limit=0)
     return jsonify({
         'status': 'ok',
         'exchange': EXCHANGE_ID,
@@ -854,7 +1035,14 @@ def health():
         'signal_cache_ttl': _cache['cache_ttl'],
         'signal_last_update': _cache['last_update'],
         'kline_cache_base_ttl': _cache_ttl_base,
-        'kline_cache': kline_status
+        'kline_cache': kline_status,
+        'ma_monitor': {
+            'status': ma_state['status'],
+            'updated_at': ma_state['updated_at'],
+            'age_sec': ma_state['age_sec'],
+            'scan_count': ma_state['scan_count'],
+            'state_file': ma_state['state_file']
+        }
     })
 
 
@@ -1046,6 +1234,7 @@ if __name__ == '__main__':
     print(f"K线缓存基准: {_cache_ttl_base}秒")
     for tf in TIMEFRAMES:
         print(f"  {tf}: TTL={_KLINE_CACHE_TTL.get(tf, _cache_ttl_base)}秒")
+    print(f"MA共振后台(只读): {MA_STATE_FILE}")
     print("=" * 50)
     
     # 启动时先计算一次

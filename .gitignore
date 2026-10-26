@@ -71,3 +71,7 @@ obsidian-vault/
 # 备份文件
 *.bak
 *.backup
+
+# MA 共振运行时数据（每次扫描变化，不入库）
+monitor/ma_resonance_state.json
+monitor.log

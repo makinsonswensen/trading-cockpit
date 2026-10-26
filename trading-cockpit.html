@@ -1279,6 +1279,210 @@
     100% { transform: scale(1); }
   }
 
+  /* ===== 模块6：MA共振后台 ===== */
+  .ma-health {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: center;
+    gap: 8px 22px;
+    padding: 10px 14px;
+    margin-bottom: 16px;
+    border: 1px dashed var(--border-main);
+    border-radius: 6px;
+    background-color: rgba(201, 191, 168, 0.06);
+    font-size: 12px;
+    color: var(--text-secondary);
+  }
+
+  .ma-health-item strong {
+    font-family: 'Courier New', monospace;
+    font-weight: 600;
+    color: var(--text-primary);
+    margin-left: 2px;
+  }
+
+  .ma-health-state {
+    display: inline-flex;
+    align-items: center;
+    gap: 6px;
+    font-weight: 600;
+    letter-spacing: 0.5px;
+  }
+
+  .ma-health-state .dot {
+    width: 7px;
+    height: 7px;
+    border-radius: 50%;
+    background-color: var(--color-neutral);
+  }
+
+  .ma-health-state.ok { color: var(--color-bear); }
+  .ma-health-state.ok .dot { background-color: var(--color-bear); animation: blink 1.8s ease-in-out infinite; }
+
+  .ma-health-state.stale { color: #a8871f; }
+  .ma-health-state.stale .dot { background-color: #c9a227; }
+
+  .ma-health-state.unavailable { color: var(--color-bull); }
+  .ma-health-state.unavailable .dot { background-color: var(--color-bull); }
+
+  .ma-monitor-wrap {
+    display: grid;
+    grid-template-columns: 2fr 1fr;
+    gap: 24px;
+    align-items: start;
+  }
+
+  .ma-table {
+    width: 100%;
+    border-collapse: collapse;
+    font-size: 12px;
+  }
+
+  .ma-table th {
+    padding: 6px 8px;
+    font-size: 11px;
+    font-weight: 600;
+    color: var(--text-secondary);
+    text-align: left;
+    letter-spacing: 0.5px;
+    border-bottom: 1px solid var(--border-main);
+  }
+
+  .ma-table td {
+    padding: 7px 8px;
+    border-bottom: 1px dashed rgba(201, 191, 168, 0.35);
+    vertical-align: middle;
+  }
+
+  .ma-table tr:last-child td { border-bottom: none; }
+  .ma-table tbody tr { transition: background-color 0.2s ease; }
+  .ma-table tbody tr:hover { background-color: rgba(201, 191, 168, 0.06); }
+
+  .ma-symbol {
+    font-weight: 600;
+    font-size: 12px;
+    color: var(--text-primary);
+    letter-spacing: 0.3px;
+    white-space: nowrap;
+  }
+
+  .ma-dir {
+    display: inline-block;
+    padding: 1px 8px;
+    border-radius: 9px;
+    font-size: 10px;
+    font-weight: 600;
+    white-space: nowrap;
+  }
+
+  .ma-dir.bull { background-color: var(--color-bull-light); color: var(--color-bull); }
+  .ma-dir.bear { background-color: var(--color-bear-light); color: var(--color-bear); }
+  .ma-dir.none { background-color: var(--color-neutral-light); color: var(--text-secondary); }
+
+  .ma-progress {
+    display: inline-flex;
+    align-items: center;
+    gap: 6px;
+    font-family: 'Courier New', monospace;
+    font-size: 11px;
+    color: var(--text-secondary);
+  }
+
+  .ma-progress-bar {
+    width: 44px;
+    height: 4px;
+    border-radius: 2px;
+    background-color: rgba(201, 191, 168, 0.35);
+    overflow: hidden;
+  }
+
+  .ma-progress-bar span {
+    display: block;
+    height: 100%;
+    width: 0;
+    background-color: var(--color-neutral);
+    transition: width 0.4s ease;
+  }
+
+  .ma-progress.bull .ma-progress-bar span { background-color: var(--color-bull); }
+  .ma-progress.bear .ma-progress-bar span { background-color: var(--color-bear); }
+
+  .ma-summary {
+    font-family: 'Courier New', monospace;
+    font-size: 11px;
+    color: var(--text-secondary);
+    white-space: nowrap;
+  }
+
+  .ma-time {
+    font-size: 10px;
+    color: var(--text-secondary);
+    opacity: 0.8;
+    white-space: nowrap;
+    font-family: 'Courier New', monospace;
+  }
+
+  .ma-events {
+    display: flex;
+    flex-direction: column;
+    gap: 8px;
+    max-height: 420px;
+    overflow-y: auto;
+    margin-top: 10px;
+  }
+
+  .ma-event {
+    padding: 7px 10px;
+    border-left: 2px solid var(--border-main);
+    border-radius: 0 4px 4px 0;
+    background-color: rgba(201, 191, 168, 0.06);
+  }
+
+  .ma-event.bull { border-left-color: var(--color-bull); }
+  .ma-event.bear { border-left-color: var(--color-bear); }
+
+  .ma-event-top {
+    display: flex;
+    justify-content: space-between;
+    align-items: baseline;
+    font-size: 11px;
+    gap: 8px;
+  }
+
+  .ma-event-symbol { font-weight: 600; color: var(--text-primary); }
+  .ma-event-time { font-size: 10px; color: var(--text-secondary); white-space: nowrap; }
+
+  .ma-event-detail {
+    margin-top: 3px;
+    font-size: 10px;
+    color: var(--text-secondary);
+    font-family: 'Courier New', monospace;
+  }
+
+  .ma-monitor-empty {
+    padding: 24px 10px;
+    text-align: center;
+    font-size: 12px;
+    color: var(--text-secondary);
+  }
+
+  .gate-note {
+    margin-left: 24px;
+    margin-top: 4px;
+    font-size: 10px;
+    color: var(--text-secondary);
+    font-family: 'Courier New', monospace;
+    opacity: 0.85;
+  }
+
+  /* 显示顺序：MA共振后台在上，共生者·决策系统在下 */
+  .grid-bottom > .ma-monitor { order: 1; }
+  .grid-bottom > .decision-system { order: 2; }
+
+  @media (max-width: 900px) {
+    .ma-monitor-wrap { grid-template-columns: 1fr; }
+  }
+
   /* ===== 底部状态 ===== */
   .footer-bar {
     display: flex;
@@ -1406,7 +1610,7 @@
   <div class="card">
     <div class="card-header">
       <div class="card-title">K线形态预警</div>
-      <div class="card-subtitle">形态识别</div>
+      <div class="card-subtitle">参考 · 非闸门</div>
     </div>
     <div class="pattern-list" id="pattern-list">
       <!-- 动态生成 -->
@@ -1457,8 +1661,9 @@
                 <ul class="gate-list">
                   <li><span class="gate-icon pending" id="gate1-icon">?</span> 均线排列</li>
                   <li><span class="gate-icon pending" id="gate2-icon">?</span> 周期共振</li>
-                  <li><span class="gate-icon pending" id="gate3-icon">?</span> 形态触发</li>
+                  <li><span class="gate-icon pending" id="gate3-icon">?</span> MA共振</li>
                 </ul>
+                <div class="gate-note" id="gate3-note">读取后台状态中...</div>
               </div>
             </div>
           </div>
@@ -1568,6 +1773,50 @@
       </div>
     </div>
   </div>
+
+  <!-- 模块6：MA共振后台（只读展示，数据来自盯盘服务） -->
+  <div class="card ma-monitor">
+    <div class="card-header">
+      <div class="card-title">MA共振后台 · 每5分钟扫描</div>
+      <div class="card-subtitle" id="ma-health-updated">--</div>
+    </div>
+
+    <div class="ma-health">
+      <span class="ma-health-state unavailable" id="ma-health-state">
+        <span class="dot"></span><span id="ma-health-text">读取中</span>
+      </span>
+      <span class="ma-health-item">扫描次数 <strong id="ma-scan-count">--</strong></span>
+      <span class="ma-health-item">累计事件 <strong id="ma-total-alerts">--</strong></span>
+      <span class="ma-health-item">监控标的 <strong id="ma-watch-count">--</strong></span>
+      <span class="ma-health-item">上次扫描 <strong id="ma-last-scan">--</strong></span>
+      <span class="ma-health-item">下次扫描 <strong id="ma-next-scan">--</strong></span>
+    </div>
+
+    <div class="ma-monitor-wrap">
+      <div>
+        <table class="ma-table">
+          <thead>
+            <tr>
+              <th>标的</th>
+              <th>已确认方向</th>
+              <th>候选确认</th>
+              <th>三周期组合</th>
+              <th>更新</th>
+            </tr>
+          </thead>
+          <tbody id="ma-snapshot-body">
+            <tr><td colspan="5" class="ma-monitor-empty">读取中...</td></tr>
+          </tbody>
+        </table>
+      </div>
+      <div>
+        <div class="col-title">最近共振事件</div>
+        <div class="ma-events" id="ma-event-list">
+          <div class="ma-monitor-empty">暂无事件</div>
+        </div>
+      </div>
+    </div>
+  </div>
 </div>
 
 <!-- 底部状态栏 -->
@@ -1598,6 +1847,7 @@ const state = {
   resonance: null,
   patterns: [],
   decision: null,
+  maMonitor: null,
   lastUpdate: null,
   fromCache: false,
   cacheRemaining: 0
@@ -1620,7 +1870,11 @@ function formatLargeNumber(num) {
 // ---------- 从后端获取数据 ----------
 async function fetchData() {
   try {
-    const response = await fetch(`${API_BASE}/signal`);
+    // 并行请求：信号 + MA共振后台状态（后台状态失败不影响主流程）
+    const [response, maResponse] = await Promise.all([
+      fetch(`${API_BASE}/signal`),
+      fetch(`${API_BASE}/ma_resonance?limit=8`).catch(() => null)
+    ]);
     if (!response.ok) throw new Error('API error: ' + response.status);
     const data = await response.json();
     
@@ -1637,6 +1891,17 @@ async function fetchData() {
     state.lastUpdate = data.datetime;
     state.fromCache = data.from_cache;
     state.cacheRemaining = data.cache_remaining;
+    
+    // MA共振后台状态：优先用独立接口（实时），失败则用信号里附带的快照
+    if (maResponse && maResponse.ok) {
+      try {
+        state.maMonitor = await maResponse.json();
+      } catch (e) {
+        state.maMonitor = data.ma_monitor || state.maMonitor;
+      }
+    } else {
+      state.maMonitor = data.ma_monitor || state.maMonitor;
+    }
     
     // 渲染所有模块
     renderAll();
@@ -1909,6 +2174,18 @@ function renderDecision() {
     }
   });
   
+  // 闸门三补充说明：MA共振后台的方向与组合
+  const gateNote = document.getElementById('gate3-note');
+  if (gateNote) {
+    const mg = d.ma_gate;
+    if (!mg || !mg.available) {
+      gateNote.textContent = '后台未运行或数据不可用 · 闸门不放行';
+    } else {
+      const dirText = mg.kind === 'bull' ? '多头共振' : mg.kind === 'bear' ? '空头共振' : '未共振';
+      gateNote.textContent = `BTC ${dirText} · ${mg.summary || '--'}`;
+    }
+  }
+  
   // 更新执行参数
   const exec = d.execution;
   document.getElementById('entry-price').textContent = formatPrice(exec.entry_price);
@@ -1922,6 +2199,100 @@ function renderDecision() {
   signalOutput.className = 'signal-output ' + d.signal.type;
   document.getElementById('signal-text').textContent = d.signal.text;
   document.getElementById('signal-subtext').textContent = d.signal.subtext;
+}
+
+// ---------- 模块6：MA共振后台 ----------
+function formatISOTime(iso) {
+  if (!iso) return '--';
+  const s = String(iso);
+  return s.length >= 19 ? s.slice(11, 19) : s;
+}
+
+function formatAge(sec) {
+  if (sec === null || sec === undefined) return '--';
+  if (sec < 60) return sec + ' 秒前';
+  if (sec < 3600) return Math.floor(sec / 60) + ' 分钟前';
+  return Math.floor(sec / 3600) + ' 小时前';
+}
+
+function renderMAMonitor() {
+  const m = state.maMonitor;
+  if (!m) return;
+  
+  // 运行状态徽标
+  const statusMap = {
+    ok: ['ok', '后台运行中'],
+    stale: ['stale', '后台已停摆'],
+    unavailable: ['unavailable', '后台不可用']
+  };
+  const st = statusMap[m.status] || ['unavailable', '状态未知'];
+  document.getElementById('ma-health-state').className = 'ma-health-state ' + st[0];
+  document.getElementById('ma-health-text').textContent = st[1];
+  document.getElementById('ma-health-updated').textContent =
+    m.updated_at ? '最后写入 ' + formatISOTime(m.updated_at) : '暂无写入';
+  
+  document.getElementById('ma-scan-count').textContent = (m.scan_count ?? '--');
+  document.getElementById('ma-total-alerts').textContent = (m.total_alerts ?? '--');
+  document.getElementById('ma-watch-count').textContent = (m.watch_count ?? '--');
+  document.getElementById('ma-last-scan').textContent =
+    m.updated_at ? formatISOTime(m.updated_at) + '（' + formatAge(m.age_sec) + '）' : '--';
+  document.getElementById('ma-next-scan').textContent =
+    (m.next_scan_in_sec === null || m.next_scan_in_sec === undefined) ? '--'
+      : (m.next_scan_in_sec < 60 ? m.next_scan_in_sec + ' 秒后' : Math.round(m.next_scan_in_sec / 60) + ' 分钟后');
+  
+  // 标的确认进度表
+  const tbody = document.getElementById('ma-snapshot-body');
+  const snaps = m.snapshots || [];
+  if (!snaps.length) {
+    tbody.innerHTML = `<tr><td colspan="5" class="ma-monitor-empty">${m.message || '暂无标的快照'}</td></tr>`;
+  } else {
+    tbody.innerHTML = snaps.map(s => {
+      const kind = s.kind === 'bull' ? 'bull' : (s.kind === 'bear' ? 'bear' : 'none');
+      const kindText = s.kind === 'bull' ? '多头共振' : (s.kind === 'bear' ? '空头共振' : '未共振');
+      const cand = s.candidate === 'bull' ? '多' : (s.candidate === 'bear' ? '空' : '-');
+      const candClass = s.candidate === 'bull' ? 'bull' : (s.candidate === 'bear' ? 'bear' : '');
+      const need = s.confirm_scans || 4;
+      const pct = Math.max(0, Math.min(100, (s.candidate_count / need) * 100));
+      return `
+        <tr>
+          <td class="ma-symbol">${s.symbol.replace('/USDT', '')}</td>
+          <td><span class="ma-dir ${kind}">${kindText}</span></td>
+          <td>
+            <span class="ma-progress ${candClass}">
+              <span class="ma-progress-bar"><span style="width:${pct}%"></span></span>
+              ${cand} ${s.confirm_progress}
+            </span>
+          </td>
+          <td class="ma-summary">${s.summary}</td>
+          <td class="ma-time">${formatISOTime(s.updated_at)}</td>
+        </tr>
+      `;
+    }).join('');
+  }
+  
+  // 最近共振事件
+  const eventList = document.getElementById('ma-event-list');
+  const events = m.history || [];
+  if (!events.length) {
+    eventList.innerHTML = '<div class="ma-monitor-empty">暂无共振事件</div>';
+  } else {
+    eventList.innerHTML = events.map(ev => {
+      const kind = ev.kind === 'bull' ? 'bull' : (ev.kind === 'bear' ? 'bear' : '');
+      const title = ev.kind === 'bull' ? '建立多头共振' : (ev.kind === 'bear' ? '建立空头共振' : '共振变化');
+      const price = ev.price
+        ? '$' + Number(ev.price).toLocaleString('en-US', { maximumFractionDigits: 4 })
+        : '--';
+      return `
+        <div class="ma-event ${kind}">
+          <div class="ma-event-top">
+            <span class="ma-event-symbol">${String(ev.symbol).replace('/USDT', '')} · ${title}</span>
+            <span class="ma-event-time">${formatISOTime(ev.detected_at)}</span>
+          </div>
+          <div class="ma-event-detail">${ev.summary} · ${price}</div>
+        </div>
+      `;
+    }).join('');
+  }
 }
 
 // ---------- 底部状态栏 ----------
@@ -1951,6 +2322,7 @@ function renderAll() {
   renderResonance();
   renderPatterns();
   renderDecision();
+  renderMAMonitor();
   updateFooter();
 }
 

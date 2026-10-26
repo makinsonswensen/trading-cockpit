@@ -37,7 +37,7 @@
 | 阶段 | 功能 | 说明 |
 |------|------|------|
 | ① 宏观雷达 | 大周期趋势判向 | 方向 / 强度 / 市场结构 |
-| ② 微观狙击 | 三道闸门验证 | 均线排列 ✓ 周期共振 ✓ 形态触发 ✓ |
+| ② 微观狙击 | 三道闸门验证 | 均线排列 ✓ 周期共振 ✓ MA共振 ✓ |
 | ③ 风控执行 | 止损止盈管理 | 入场价 / 止损位 / 止盈位 / 仓位 |
 
 ### 交易心得笔记
@@ -162,14 +162,38 @@ KLINE_LIMIT = 150             # 每周期K线数量
 trading-cockpit/
 ├── app.py                 # Flask 后端服务（信号计算 + API + 两层缓存）
 ├── trading-cockpit.html   # 前端驾驶舱页面
-├── start.bat              # Windows 启动脚本
-├── start.sh               # macOS/Linux 启动脚本
+├── monitor/               # MA 共振后台（自包含，独立进程）
+│   ├── scheduler.py       # 每 5 分钟（5m K线收盘后）触发一次扫描的调度器
+│   ├── ma_monitor.py      # 扫描主流程：取数 → 判级 → 共振 → 推送 → 落盘状态
+│   ├── ma_resonance.py    # 均线判定与共振逻辑、消息文案
+│   ├── data_fetcher.py    # CCXT 多交易所取数与降级
+│   ├── notifier.py        # 飞书 Webhook / 桌面弹窗推送
+│   ├── config.py          # 监控配置（标的、周期、阈值、Webhook）
+│   └── ma_resonance_state.json  # 运行时状态（自动生成，已 gitignore）
+├── start.bat              # Windows 启动脚本（MA 后台 + 驾驶舱）
+├── start.sh               # macOS/Linux 启动脚本（MA 后台 + 驾驶舱）
 ├── requirements.txt       # Python 依赖
 ├── .env.example           # 环境变量模板（提交到 Git）
 ├── .env                   # 本地配置（不提交，已 gitignore）
 ├── .gitignore             # Git 忽略规则
 └── README.md              # 项目说明文档
 ```
+
+---
+
+## MA 共振后台（monitor/）
+
+- **来源**：从独立项目 `盯盘查看信号报警` 精简迁入，只保留 1h / 15m / 5m 三周期 MA 共振判定与推送，
+  原有的形态扫描、动量筛选、日报、网页仪表盘等均未迁入。
+- **运行**：`start.bat`（或 `start.sh`）会同时起 MA 后台与驾驶舱；也可单独运行
+  `python monitor/scheduler.py`。后台在每根 5m K线收盘后的第 20 秒扫描一次。
+- **状态文件**：`monitor/ma_resonance_state.json`（运行时生成，已 gitignore），
+  保存各标的确认进度与共振事件历史，供驾驶舱 `GET /api/ma_resonance` 只读展示。
+- **与驾驶舱的关系**：驾驶舱只读该 JSON，不 import 监控模块、不触发扫描、不写文件，
+  二者进程隔离、互不冲突。后台停摆超过 `MA_STALE_SECONDS` 时接口状态变为 `stale`。
+- **环境变量**：`MA_STATE_FILE`（可覆盖状态文件路径）、
+  `MA_SCAN_INTERVAL` / `MA_STALE_SECONDS` / `MA_CONFIRM_SCANS` 已在 `.env.example` 说明；
+  飞书推送地址在 `.env` 中配置（`FEISHU_WEBHOOK_URL`，可选 `MA_FEISHU_WEBHOOK_URL` 单独指定）。
 
 ---
 
@@ -188,6 +212,19 @@ GET /api/health
 ```
 
 返回信号缓存状态和每个周期的K线缓存状态（命中/过期、剩余秒数、TTL、K线数量）。
+
+### MA 共振后台状态
+```
+GET /api/ma_resonance?limit=8
+```
+
+只读展示「盯盘查看信号报警」后台的运行情况：状态（ok / stale / unavailable）、
+扫描次数、累计事件、上次扫描距今秒数、下次扫描倒计时、各标的确认进度（x/4）
+与最近共振事件。`limit` 控制返回的事件条数（0-50）。
+
+该接口只读 `ma_resonance_state.json`，不导入对方模块、不触发扫描、不写入文件，
+因此不会与后台进程冲突；后台停摆超过 `MA_STALE_SECONDS` 时状态变为 `stale`，
+此时微观狙击的第三道闸门（MA共振同向）判为不通过。
 
 ### 强制刷新数据
 ```
