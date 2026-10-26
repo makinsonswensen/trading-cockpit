@@ -94,7 +94,24 @@ if api_key and api_secret:
     exchange_config['apiKey'] = api_key
     exchange_config['secret'] = api_secret
 
-exchange = getattr(ccxt, EXCHANGE_ID)(exchange_config)
+# 主交易所不可用（如被限流 418/-1003）时依次尝试的备用交易所
+EXCHANGE_FALLBACKS = [
+    x.strip() for x in os.environ.get('EXCHANGE_FALLBACKS', 'gate').split(',') if x.strip()
+]
+EXCHANGE_ORDER = [EXCHANGE_ID] + [x for x in EXCHANGE_FALLBACKS if x != EXCHANGE_ID]
+
+_exchange_clients = {}
+# 记录最近一次成功取数的交易所，供页面与健康检查展示
+_active_exchange = {'id': EXCHANGE_ID}
+
+
+def get_exchange(ex_id):
+    """按 id 惰性创建并复用 ccxt 客户端"""
+    client = _exchange_clients.get(ex_id)
+    if client is None:
+        client = getattr(ccxt, ex_id)(exchange_config)
+        _exchange_clients[ex_id] = client
+    return client
 
 
 # ========== 工具函数 ==========
@@ -143,14 +160,28 @@ def fetch_klines():
             cached.append(tf)
             continue
 
-        try:
-            ohlcv = exchange.fetch_ohlcv(SYMBOL, timeframe=tf, limit=KLINE_LIMIT)
-            klines[tf] = ohlcv
-            _kline_cache[tf] = {'data': ohlcv, 'ts': now}
-            fetched.append(tf)
-            time.sleep(exchange.rateLimit / 1000)
-        except Exception as e:
-            print(f"[ERROR] 获取 {tf} K线失败: {e}")
+        ok = False
+        last_error = None
+        for ex_id in EXCHANGE_ORDER:
+            try:
+                client = get_exchange(ex_id)
+                ohlcv = client.fetch_ohlcv(SYMBOL, timeframe=tf, limit=KLINE_LIMIT)
+                if not ohlcv:
+                    raise ValueError('交易所返回空K线')
+                klines[tf] = ohlcv
+                _kline_cache[tf] = {'data': ohlcv, 'ts': now}
+                _active_exchange['id'] = ex_id
+                fetched.append(f'{tf}@{ex_id}')
+                if ex_id != EXCHANGE_ID:
+                    print(f"[降级] {tf} K线改用 {ex_id}（{EXCHANGE_ID} 不可用）")
+                time.sleep(client.rateLimit / 1000)
+                ok = True
+                break
+            except Exception as e:
+                last_error = e
+
+        if not ok:
+            print(f"[ERROR] 获取 {tf} K线失败（已尝试 {', '.join(EXCHANGE_ORDER)}）: {last_error}")
             if entry:
                 klines[tf] = entry['data']
                 cached.append(tf)
@@ -918,7 +949,7 @@ def get_market_data(klines, ma_data):
     
     return {
         'symbol': SYMBOL,
-        'exchange': EXCHANGE_ID,
+        'exchange': _active_exchange['id'],
         'current_price': round(current_price, 2) if current_price else None,
         'change_24h': round(change_24h, 2),
         'high_24h': round(high_24h, 2) if high_24h else None,
@@ -1053,7 +1084,8 @@ def health():
     ma_state = load_ma_state(history_limit=0)
     return jsonify({
         'status': 'ok',
-        'exchange': EXCHANGE_ID,
+        'exchange': _active_exchange['id'],
+        'exchange_order': EXCHANGE_ORDER,
         'symbol': SYMBOL,
         'signal_cache_ttl': _cache['cache_ttl'],
         'signal_last_update': _cache['last_update'],
@@ -1250,7 +1282,7 @@ def force_refresh():
 if __name__ == '__main__':
     print("=" * 50)
     print("共生者交易决策系统 - 后端服务")
-    print(f"交易所: {EXCHANGE_ID}")
+    print(f"交易所: {' → '.join(EXCHANGE_ORDER)}（主用不可用时自动降级）")
     print(f"交易对: {SYMBOL}")
     print(f"周期: {', '.join(TIMEFRAMES)}")
     print(f"信号缓存: {_cache['cache_ttl']}秒")

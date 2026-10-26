@@ -21,9 +21,10 @@ def get_timeframe_label(timeframe):
 
 
 def gen_feishu_sign(secret, timestamp):
-    """生成飞书签名"""
+    """生成飞书签名：以 secret 为密钥，对 "timestamp\nsecret" 做 HMAC-SHA256"""
     string_to_sign = f'{timestamp}\n{secret}'
     hmac_code = hmac.new(
+        secret.encode('utf-8'),
         string_to_sign.encode('utf-8'),
         digestmod=hashlib.sha256
     ).digest()
