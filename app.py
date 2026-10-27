@@ -690,8 +690,18 @@ def load_ma_state(history_limit=8):
 
         mtime = os.path.getmtime(MA_STATE_FILE)
         if _ma_state_cache['data'] is None or _ma_state_cache['mtime'] != mtime:
-            with open(MA_STATE_FILE, 'r', encoding='utf-8') as f:
-                _ma_state_cache['data'] = json.load(f)
+            # 后台写文件时可能出现瞬时半成品，重试几次再放弃，避免页面闪一下"后台不可用"
+            data = None
+            for attempt in range(3):
+                try:
+                    with open(MA_STATE_FILE, 'r', encoding='utf-8') as f:
+                        data = json.load(f)
+                    break
+                except (json.JSONDecodeError, UnicodeDecodeError):
+                    if attempt == 2:
+                        raise
+                    time.sleep(0.2)
+            _ma_state_cache['data'] = data
             _ma_state_cache['mtime'] = mtime
         data = _ma_state_cache['data'] or {}
     except Exception as e:

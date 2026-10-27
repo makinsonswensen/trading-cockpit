@@ -88,8 +88,14 @@ class MAResonanceMonitor:
                 'scan_count': self.scan_count,
                 'updated_at': datetime.now().isoformat(),
             }
-            with open(config.MA_STATE_FILE, 'w', encoding='utf-8') as f:
+            # 原子写入：先写临时文件再整体替换，
+            # 避免驾驶舱读到写了一半的内容（或两个调度器同时写时出现拼接的 JSON）
+            tmp_file = config.MA_STATE_FILE + '.tmp'
+            with open(tmp_file, 'w', encoding='utf-8') as f:
                 json.dump(payload, f, ensure_ascii=False, indent=2, default=str)
+                f.flush()
+                os.fsync(f.fileno())
+            os.replace(tmp_file, config.MA_STATE_FILE)
         except Exception as e:
             print(f"[MA共振] 状态保存失败: {e}")
 
