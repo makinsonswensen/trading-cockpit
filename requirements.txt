@@ -7,6 +7,7 @@ Flask>=3.0.0         # Web 框架
 flask-cors>=4.0.0    # 跨域支持
 numpy>=1.24.0        # 数值计算（均线计算等）
 python-dotenv>=1.0.0 # 环境变量加载（.env）
+gunicorn>=22.0.0     # WSGI 生产服务器（Render / Railway 部署）
 
 # ===== MA 共振后台（monitor/）=====
 pandas>=2.0.0        # K线数据处理
