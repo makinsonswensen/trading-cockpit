@@ -57,15 +57,27 @@ if not exist ".env" (
 )
 echo       配置文件就绪
 
+:: 端口占用检查：Windows 允许多个进程同时 bind 同一端口，
+:: 新请求会被随机分给已经卡死的旧进程，表现为"能连上但一直无响应"
+echo [3/5] 检查端口 5001...
+netstat -ano | findstr ":5001" | findstr "LISTENING" >nul 2>&1
+if not errorlevel 1 (
+    echo [ERROR] 端口 5001 已被占用，说明上一次的驾驶舱还没退出。
+    echo         请关闭那个窗口；若已无窗口，用任务管理器结束残留的 python.exe 后重试。
+    pause
+    exit /b 1
+)
+echo       端口可用
+
 :: 先启动 MA 共振后台（独立最小化窗口，不阻塞驾驶舱）
-echo [3/4] 启动 MA 共振后台（每 5 分钟扫描，独立窗口）...
+echo [4/5] 启动 MA 共振后台（每 5 分钟扫描，独立窗口）...
 start "MA共振后台" /min "%PYTHONW%" "%~dp0monitor\scheduler.py"
 echo       已启动，状态文件: monitor\ma_resonance_state.json
 rem 稍等后台加载历史状态，避免驾驶舱首个请求读到不存在的文件
 timeout /t 2 /nobreak >nul
 
 :: 再前台启动驾驶舱
-echo [4/4] 启动交易驾驶舱...
+echo [5/5] 启动交易驾驶舱...
 echo.
 echo ==================================================
 %PYTHON% app.py
