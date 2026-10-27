@@ -1,0 +1,14 @@
+# 统一换行符约定，避免跨平台检出后脚本无法执行
+# Windows 批处理必须 CRLF，否则 cmd.exe 会把首行和行尾拆碎
+*.bat text eol=crlf
+*.cmd text eol=crlf
+
+# Shell 脚本必须 LF，否则 Linux/macOS 报 bad interpreter
+*.sh text eol=lf
+
+# 其余文本统一 LF
+*.py text eol=lf
+*.html text eol=lf
+*.md text eol=lf
+*.json text eol=lf
+*.txt text eol=lf

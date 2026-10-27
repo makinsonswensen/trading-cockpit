@@ -108,6 +108,7 @@ python app.py
 | 变量名 | 说明 | 默认值 |
 |--------|------|--------|
 | `EXCHANGE_ID` | 交易所 ID（ccxt 支持的交易所） | `binance` |
+| `EXCHANGE_FALLBACKS` | 主用交易所被限流/连不上时依次切换的备用所（逗号分隔） | `gate` |
 | `SYMBOL` | 交易对 | `BTC/USDT` |
 | `CACHE_TTL` | 信号结果缓存时间（秒） | `300` |
 | `cache_ttl_sec` | K线缓存基准TTL（秒），各周期按此缩放 | `60` |
