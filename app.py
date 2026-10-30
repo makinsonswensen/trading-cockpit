@@ -10,6 +10,7 @@ from flask import Flask, jsonify, send_from_directory, request
 from flask_cors import CORS
 from datetime import datetime
 import os
+import threading
 
 # 尝试加载 .env 文件（可选依赖）
 try:
@@ -927,6 +928,139 @@ def calc_decision(ma_data, resonance_data, patterns, ma_gate=None):
     }
 
 
+# ========== 资金费率 ==========
+# 资金费率只是附加指标：独立缓存 + 后台异步刷新，不阻塞行情主链路
+_funding_clients = {}
+_funding_cache = {'data': None, 'ts': 0.0, 'inflight': False}
+_funding_lock = threading.Lock()
+FUNDING_TTL = int(os.environ.get('FUNDING_TTL', 120))
+
+_FUNDING_UNAVAILABLE = {
+    'available': False,
+    'exchange': None,
+    'rate_pct': None,
+    'annualized_pct': None,
+    'next_time': None,
+    'mark_price': None,
+}
+
+
+def _get_funding_exchange(ex_id):
+    """按交易所 id 复用资金费率客户端（与 get_exchange 的复用思路一致）"""
+    exchange = _funding_clients.get(ex_id)
+    if exchange is None:
+        opts = {
+            'enableRateLimit': True,
+            # 后台线程里请求，放宽到 8 秒以容纳首次 exchangeInfo 加载
+            'timeout': int(os.environ.get('FUNDING_TIMEOUT_MS', 8000)),
+        }
+        if ex_id == 'gate':
+            opts['options'] = {'defaultType': 'swap'}
+        exchange = getattr(ccxt, ex_id)(opts)
+        _funding_clients[ex_id] = exchange
+    return exchange
+
+
+def _funding_interval_sec(info):
+    """从交易所返回的原始字段取结算间隔（秒），取不到返回 None"""
+    for key in ('funding_interval', 'fundingInterval'):  # Gate 等，单位秒
+        if info.get(key):
+            try:
+                return float(info[key])
+            except (TypeError, ValueError):
+                return None
+    if info.get('fundingIntervalHours'):
+        try:
+            return float(info['fundingIntervalHours']) * 3600
+        except (TypeError, ValueError):
+            return None
+    return None
+
+
+def _interval_from_history(exchange, unified):
+    """用最近两次结算时间差推算间隔（Binance 不返回间隔字段时使用）"""
+    try:
+        history = exchange.fetch_funding_rate_history(unified, limit=2)
+        if history and len(history) >= 2:
+            delta = history[-1]['timestamp'] - history[-2]['timestamp']
+            if delta and delta > 0:
+                return float(delta) / 1000
+    except Exception as e:
+        print(f"[WARN] 资金费率间隔推算失败({getattr(exchange, 'id', '?')}): {e}")
+    return None
+
+
+def _annualize_funding(rate, interval_sec):
+    """按实际结算间隔折算年化费率；间隔未知返回 None（不按 8 小时假设）"""
+    if not interval_sec or interval_sec <= 0:
+        return None
+    return round(rate * (365 * 24 * 3600 / interval_sec) * 100, 2)
+
+
+def fetch_funding_rate():
+    """获取永续合约资金费率（公开接口，无需 API Key）
+
+    优先 binanceusdm（U 本位合约），失败降级到 gate 永续。
+    正值代表多头付空头；年化按实际结算间隔折算，取不到间隔则返回 null。
+    """
+    base = SYMBOL.split('/')[0]
+    unified = f"{base}/USDT:USDT"
+    for ex_id in ['binanceusdm', 'gate']:
+        try:
+            exchange = _get_funding_exchange(ex_id)
+            fr = exchange.fetch_funding_rate(unified)
+            rate = fr.get('fundingRate')
+            if rate is None:
+                continue
+            interval_sec = _funding_interval_sec(fr.get('info') or {})
+            if interval_sec is None:
+                interval_sec = _interval_from_history(exchange, unified)
+            last_ts = fr.get('fundingTimestamp')
+            next_ts = fr.get('nextFundingTimestamp') or last_ts
+            return {
+                'available': True,
+                'exchange': ex_id,
+                'rate_pct': round(float(rate) * 100, 4),
+                'annualized_pct': _annualize_funding(float(rate), interval_sec),
+                'next_time': datetime.fromtimestamp(next_ts / 1000).strftime('%m-%d %H:%M') if next_ts else None,
+                'mark_price': round(float(fr['markPrice']), 2) if fr.get('markPrice') else None,
+            }
+        except Exception as e:
+            print(f"[WARN] 资金费率获取失败({ex_id}): {e}")
+    return dict(_FUNDING_UNAVAILABLE)
+
+
+def _refresh_funding_rate():
+    """后台刷新资金费率缓存"""
+    try:
+        data = fetch_funding_rate()
+        if data.get('available'):
+            _funding_cache['data'] = data
+            _funding_cache['ts'] = time.time()
+        else:
+            # 未取到就 30 秒后再试，不要占满整个 TTL
+            _funding_cache['ts'] = time.time() - FUNDING_TTL + 30
+    except Exception as e:
+        print(f"[WARN] 资金费率刷新失败: {e}")
+        _funding_cache['ts'] = time.time() - FUNDING_TTL + 30
+    finally:
+        with _funding_lock:
+            _funding_cache['inflight'] = False
+
+
+def get_funding_rate():
+    """返回资金费率（命中缓存直接返回；过期则触发一次后台刷新）"""
+    now = time.time()
+    cached = _funding_cache['data']
+    if cached and (now - _funding_cache['ts']) < FUNDING_TTL:
+        return cached
+    with _funding_lock:
+        if not _funding_cache['inflight']:
+            _funding_cache['inflight'] = True
+            threading.Thread(target=_refresh_funding_rate, daemon=True).start()
+    return cached if cached else dict(_FUNDING_UNAVAILABLE)
+
+
 # ========== 行情数据 ==========
 def get_market_data(klines, ma_data):
     """获取市场行情数据"""
@@ -997,6 +1131,8 @@ def compute_all():
     
     # 8. 行情数据
     market = get_market_data(klines, ma_data)
+    # 9. 永续合约资金费率（独立缓存 + 后台刷新，失败不影响主流程）
+    market['funding'] = get_funding_rate()
     
     result = {
         'timestamp': int(time.time()),
@@ -1027,6 +1163,9 @@ def get_signal():
     # 检查缓存
     if _cache['data'] and (now - _cache['last_update']) < _cache['cache_ttl']:
         result = _cache['data'].copy()
+        # 资金费率有自己的短 TTL，命中信号缓存时仍取最新值
+        result['market'] = dict(result.get('market') or {})
+        result['market']['funding'] = get_funding_rate()
         result['from_cache'] = True
         result['cache_remaining'] = int(_cache['cache_ttl'] - (now - _cache['last_update']))
         return jsonify(result)

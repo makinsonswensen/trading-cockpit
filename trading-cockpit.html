@@ -265,6 +265,15 @@
   .stat-value.high { color: var(--color-bull); }
   .stat-value.low { color: var(--color-bear); }
 
+  /* 统计格副标题（资金费率结算时间等） */
+  .stat-sub {
+    font-size: 10px;
+    color: var(--text-secondary);
+    margin-top: 2px;
+    letter-spacing: 0.3px;
+    line-height: 1.3;
+  }
+
   .price-error {
     text-align: center;
     padding: 30px 0;
@@ -1555,8 +1564,9 @@
           <div class="stat-value" id="btc-vol">--</div>
         </div>
         <div class="stat-item">
-          <div class="stat-label">市值</div>
-          <div class="stat-value" id="btc-mcap">--</div>
+          <div class="stat-label">资金费率</div>
+          <div class="stat-value" id="btc-funding">--</div>
+          <div class="stat-sub" id="btc-funding-next"></div>
         </div>
       </div>
     </div>
@@ -1936,7 +1946,8 @@ function renderPrice() {
   const highEl = document.getElementById('btc-high');
   const lowEl = document.getElementById('btc-low');
   const volEl = document.getElementById('btc-vol');
-  const mcapEl = document.getElementById('btc-mcap');
+  const fundingEl = document.getElementById('btc-funding');
+  const fundingNextEl = document.getElementById('btc-funding-next');
   
   const oldPrice = priceEl.textContent;
   priceEl.textContent = formatPrice(m.current_price);
@@ -1953,7 +1964,30 @@ function renderPrice() {
   highEl.textContent = formatPrice(m.high_24h);
   lowEl.textContent = formatPrice(m.low_24h);
   volEl.textContent = formatLargeNumber(m.volume_24h);  // 近24根1h K线估算
-  mcapEl.textContent = '--';  // CCXT 行情不含市值
+
+  // 资金费率（永续合约；正值=多头付空头，负值=空头付多头）
+  // 费率本身不是涨跌方向，用中性配色，避免与红涨绿跌语义混淆
+  const funding = m.funding || {};
+  if (funding.available && typeof funding.rate_pct === 'number') {
+    const rate = funding.rate_pct;
+    fundingEl.textContent = (rate >= 0 ? '+' : '') + rate.toFixed(4) + '%';
+    fundingEl.className = 'stat-value';
+
+    const parts = [];
+    if (typeof funding.annualized_pct === 'number') {
+      parts.push('年化 ' + (funding.annualized_pct >= 0 ? '+' : '') + funding.annualized_pct.toFixed(2) + '%');
+    }
+    if (funding.next_time) parts.push('下次结算 ' + funding.next_time);
+    fundingNextEl.textContent = parts.join(' · ') || (funding.exchange || '');
+
+    fundingEl.title = (funding.mark_price ? '标记价 ' + formatPrice(funding.mark_price) + ' · ' : '')
+      + '数据源 ' + (funding.exchange || '--') + '（正值=多头付空头）';
+  } else {
+    fundingEl.textContent = '--';
+    fundingEl.className = 'stat-value';
+    fundingNextEl.textContent = '暂不可用';
+    fundingEl.title = '永续合约资金费率暂不可用';
+  }
   
   document.getElementById('price-error').style.display = 'none';
   document.getElementById('price-container').style.display = 'block';
@@ -2322,13 +2356,15 @@ function updateFooter() {
 
 // ---------- 全局渲染 ----------
 function renderAll() {
-  renderPrice();
-  renderMARadar();
-  renderResonance();
-  renderPatterns();
-  renderDecision();
-  renderMAMonitor();
-  updateFooter();
+  // 各模块独立渲染：单个模块异常不影响其余模块刷新
+  const renderers = [renderPrice, renderMARadar, renderResonance, renderPatterns, renderDecision, renderMAMonitor, updateFooter];
+  renderers.forEach(fn => {
+    try {
+      fn();
+    } catch (err) {
+      console.error('[渲染失败]', fn.name, err);
+    }
+  });
 }
 
 // ---------- 顶部时间更新 ----------
